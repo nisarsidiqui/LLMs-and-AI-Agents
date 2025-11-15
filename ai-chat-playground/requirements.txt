@@ -1,0 +1,8 @@
+gradio==4.29.0
+transformers==4.40.0
+accelerate==0.29.3
+torch
+sentencepiece
+einops
+protobuf
+safetensors

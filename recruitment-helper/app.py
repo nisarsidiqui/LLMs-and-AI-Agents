@@ -9,14 +9,15 @@ import base64
 from datetime import datetime, timedelta
 
 # Gmail API scope
+# Gmail API scope
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 # Instead of reading from file, get credentials from environment variables
 CLIENT_CONFIG = {
-    "installed": {
+    "web": {  # Changed to "web" for web credentials
         "client_id": os.environ.get('GOOGLE_CLIENT_ID'),
         "client_secret": os.environ.get('GOOGLE_CLIENT_SECRET'),
-        "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob"],
+        "redirect_uris": ["https://accounts.google.com/o/oauth2/auth"],  # Standard Google OAuth endpoint
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
     }
@@ -48,18 +49,16 @@ def get_gmail_service(state_dict):
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            # Create flow without running local server
             flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
-            creds = flow.run_local_server(port=0)
+            # Generate authorization URL
+            auth_url, _ = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true'
+            )
             
-            # Save credentials in state
-            state_dict['token'] = {
-                'token': creds.token,
-                'refresh_token': creds.refresh_token,
-                'token_uri': creds.token_uri,
-                'client_id': creds.client_id,
-                'client_secret': creds.client_secret,
-                'scopes': creds.scopes
-            }
+            # Return the authorization URL to the user
+            return f"Please visit this URL to authorize the application: {auth_url}\n\nAfter authorization, you will receive a code. Please enter it in the application."
 
     return build('gmail', 'v1', credentials=creds)
 
@@ -123,11 +122,48 @@ def classify_email(email_data):
         'has_cv': has_cv
     }
 
-def fetch_emails(days_back, include_job=True, include_personal=True, progress=gr.Progress()):
+def fetch_emails(days_back, auth_code="", include_job=True, include_personal=True, progress=gr.Progress()):
     """Main function to fetch and filter emails"""
-    state_dict = {}
+    if not auth_code:
+        try:
+            # Configure OAuth2 flow for web application
+            flow = InstalledAppFlow.from_client_config(
+                CLIENT_CONFIG,
+                SCOPES,
+                redirect_uri="https://accounts.google.com/o/oauth2/auth"  # Standard Google OAuth endpoint
+            )
+            
+            # Generate authorization URL
+            auth_url, _ = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true'
+            )
+            
+            return f"""Please follow these steps:
+
+1. Click this link to authorize the application:
+{auth_url}
+
+2. Sign in with your Google account
+3. Click 'Allow' to grant access
+4. Copy the authorization code shown
+5. Paste the code here and click 'Connect and Fetch Emails' again"""
+            
+        except Exception as e:
+            return f"Error generating authorization URL: {str(e)}"
+    
     try:
+        # Process the auth code and fetch emails
+        flow = InstalledAppFlow.from_client_config(
+            CLIENT_CONFIG,
+            SCOPES,
+            redirect_uri="https://accounts.google.com/o/oauth2/auth"  # Same redirect URI here
+        )
+        
         service = get_gmail_service(state_dict)
+        if isinstance(service, str):
+            # This means we got an auth URL instead of a service
+            return service
         
         # Search for recent emails
         query = f'after:{int((datetime.now() - timedelta(days=int(days_back))).timestamp())}'
@@ -185,11 +221,15 @@ def fetch_emails(days_back, include_job=True, include_personal=True, progress=gr
     except Exception as e:
         return f"Error: {str(e)}"
 
-# Create Gradio interface
 def create_interface():
     with gr.Blocks(title="Email Filter") as demo:
         gr.Markdown("# 📧 Smart Email Filter")
         gr.Markdown("Connect to your Gmail account to filter important emails")
+        
+        auth_code = gr.Textbox(
+            label="Authorization Code (if required)",
+            placeholder="Enter the authorization code here after visiting the auth URL"
+        )
         
         with gr.Row():
             days_back = gr.Slider(
@@ -217,12 +257,11 @@ def create_interface():
         
         fetch_button.click(
             fn=fetch_emails,
-            inputs=[days_back, include_job, include_personal],
+            inputs=[days_back, auth_code, include_job, include_personal],
             outputs=output
         )
     
     return demo
-
-if __name__ == "__main__":
-    demo = create_interface()
-    demo.launch()
+    
+demo = create_interface()
+demo.launch()
