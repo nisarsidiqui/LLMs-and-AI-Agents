@@ -1,8 +1,12 @@
+flask==3.0.0
+flask-cors==4.0.0
 gradio==4.29.0
 transformers==4.40.0
 accelerate==0.29.3
-torch
+torch>=2.0.0
 sentencepiece
 einops
 protobuf
 safetensors
+groq==0.4.1
+requests>=2.31.0
